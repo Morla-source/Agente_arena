@@ -1992,6 +1992,7 @@ function roundRect(x, y, w, h, r) {
 
 function drawTopBar() {
   const h = 42;
+  const missionName = cfg ? cfg.name : '';
   const g = ctx.createLinearGradient(0, 0, 0, h);
   g.addColorStop(0, 'rgba(4,10,16,0.82)');
   g.addColorStop(1, 'rgba(4,10,16,0.35)');
@@ -2007,7 +2008,7 @@ function drawTopBar() {
   ctx.fillText('TU-95MS', 22, h / 2);
   hudFont(11, 500);
   ctx.fillStyle = 'rgba(180,205,220,0.75)';
-  ctx.fillText('MISIÓN ' + String(level).padStart(2, '0') + ' · ' + cfg.name, 96, h / 2);
+  ctx.fillText('MISIÓN ' + String(level).padStart(2, '0') + ' · ' + missionName, 96, h / 2);
 
   /* progreso de la misión */
   const bx = W * 0.46, bw = W * 0.30, by = h / 2;
@@ -2335,6 +2336,7 @@ function drawRunwayHint() {
 }
 
 function drawHUD() {
+  if (!plane || !cfg) return;
   ctx.save();
   drawTopBar();
   drawSpeedTape();
@@ -2358,6 +2360,8 @@ function drawVignette() {
 
 function render() {
   ctx.clearRect(0, 0, W, H);
+  /* escena segura: si por cualquier motivo falta el nivel, se reconstruye */
+  if (!plane || !startRunway || !landRunway || !cfg) resetLevel(level || 1);
   ctx.save();
   if (shake > 0.2) ctx.translate(rand(-shake, shake) * 0.4, rand(-shake, shake) * 0.4);
 
@@ -2388,6 +2392,11 @@ function loop(now) {
   render();
   requestAnimationFrame(loop);
 }
+/* ---------------- Arranque ---------------- */
+/* La escena del título también dibuja mundo, pista y avión: hay que crear el
+   nivel antes del primer fotograma o `plane`/`startRunway` están indefinidos. */
+resetLevel(1);
+document.getElementById('titleRecord').textContent = record;
 requestAnimationFrame(loop);
 
 /* ---------------- Botones ---------------- */
@@ -2400,7 +2409,6 @@ document.getElementById('startBtn').addEventListener('click', () => startLevel()
 document.getElementById('nextBtn').addEventListener('click', () => showBriefing(level + 1));
 document.getElementById('retryBtn').addEventListener('click', () => showBriefing(level));
 document.getElementById('resumeBtn').addEventListener('click', () => togglePause());
-document.getElementById('titleRecord').textContent = record;
 
 /* ---------------- API de depuración (pruebas) ---------------- */
 window.__tu95 = {
