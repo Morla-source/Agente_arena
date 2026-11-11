@@ -128,6 +128,8 @@
     </div>
     <p class="tip">Consejo: flaps al máximo (F ×2) y tren abajo (G) para despegar y aterrizar.
        Rota a ~210 km/h con ↑ y sube el tren (G) al ganar altura.</p>
+    <p class="tip" id="briefApproach" style="display:none; color:#ffd34d">MODO APROXIMACIÓN: empiezas ya en el aire, alineado con la pista.
+       Baja el tren (G), pon flaps (F) y desciende con ↑ ↓ suave.</p>
     <button id="startBtn" class="btn">▶ INICIAR MISIÓN</button>
   </div>
 
@@ -284,21 +286,23 @@ document.addEventListener('visibilitychange', () => { if (document.hidden && sta
 
 /* ---------------- Niveles / misiones ---------------- */
 const LEVELS = [
-  { dist: 9000,  wind: 0,  runwayLen: 1000, rings: [], msg: 'Despega de la pista 09 y aterriza suavemente en la pista 27.' },
-  { dist: 10000, wind: 6,  runwayLen: 900,  rings: [{ x: 3500, y: 190 }, { x: 6500, y: 270 }], msg: 'Pasa por los anillos de control y aterriza en la pista 27.' },
-  { dist: 11000, wind: 12, runwayLen: 780,  rings: [{ x: 3000, y: 250 }, { x: 6000, y: 160 }, { x: 8600, y: 230 }], msg: 'Viento cruzado y pista más corta. Configura flaps y tren para aterrizar.' },
-  { dist: 12000, wind: 18, runwayLen: 680,  rings: [{ x: 2800, y: 200 }, { x: 5200, y: 300 }, { x: 7600, y: 180 }, { x: 9800, y: 250 }], msg: 'Viento fuerte y pista corta. Mantén el balanceo con ← →.' },
-  { dist: 13000, wind: 24, runwayLen: 580,  rings: [{ x: 2600, y: 280 }, { x: 4800, y: 170 }, { x: 7000, y: 320 }, { x: 9200, y: 200 }, { x: 11200, y: 260 }], msg: 'Misión extrema. Solo pilotos expertos.' }
+  { dist: 9000,  wind: 0,  runwayLen: 1000, rings: [], approach: false, msg: 'Despega de la pista 09 y aterriza suavemente en la pista 27.' },
+  { dist: 10000, wind: 6,  runwayLen: 900,  rings: [{ x: 3500, y: 190 }, { x: 6500, y: 270 }], approach: false, msg: 'Pasa por los anillos de control y aterriza en la pista 27.' },
+  { dist: 11000, wind: 8,  runwayLen: 800,  rings: [], approach: true, msg: 'Aterrizaje de precisión: ya estás en aproximación final. Configura el avión y toca suavemente.' },
+  { dist: 12000, wind: 18, runwayLen: 680,  rings: [{ x: 2800, y: 200 }, { x: 5200, y: 300 }, { x: 7600, y: 180 }, { x: 9800, y: 250 }], approach: false, msg: 'Viento fuerte y pista corta. Mantén el balanceo con ← →.' },
+  { dist: 13000, wind: 24, runwayLen: 580,  rings: [{ x: 2600, y: 280 }, { x: 4800, y: 170 }, { x: 7000, y: 320 }, { x: 9200, y: 200 }, { x: 11200, y: 260 }], approach: false, msg: 'Misión extrema. Solo pilotos expertos.' }
 ];
 function levelConfig(n) {
   if (n <= LEVELS.length) return LEVELS[n - 1];
   const extra = n - LEVELS.length;
+  const approach = extra % 2 === 0;
   return {
     dist: 13000 + extra * 500,
     wind: Math.min(34, 24 + extra * 3),
     runwayLen: Math.max(420, 580 - extra * 40),
-    rings: LEVELS[4].rings.map(r => ({ x: r.x + extra * 120, y: clamp(r.y + rand(-40, 40), 120, 340) })),
-    msg: 'Misión extrema. Solo pilotos expertos.'
+    rings: approach ? [] : LEVELS[4].rings.map(r => ({ x: r.x + extra * 120, y: clamp(r.y + rand(-40, 40), 120, 340) })),
+    approach,
+    msg: approach ? 'Aterrizaje de precisión con viento fuerte.' : 'Misión extrema. Solo pilotos expertos.'
   };
 }
 
@@ -317,7 +321,14 @@ function resetLevel(n) {
   landRunway = { x: cfg.dist, len: cfg.runwayLen };
   worldLen = cfg.dist + cfg.runwayLen + 700;
   rings = cfg.rings.map(r => ({ x: r.x, y: r.y, r: 48, passed: false }));
-  plane = { x: startRunway.x + 90, y: 0, speed: 0, pitch: 0, bank: 0, throttle: 0, flaps: 0, gearDown: true, onGround: true, landed: false, crashed: false, vs: 0 };
+  if (cfg.approach) {
+    /* Aproximación final: ya en vuelo, rumbo a la pista, configuración en tránsito */
+    plane = { x: landRunway.x - 2400, y: 250, speed: 265, pitch: 1, bank: 0, throttle: 0.5, flaps: 1, gearDown: false,
+              onGround: false, landed: false, crashed: false, vs: 0, rollRate: 0 };
+  } else {
+    plane = { x: startRunway.x + 90, y: 0, speed: 0, pitch: 0, bank: 0, throttle: 0, flaps: 0, gearDown: true,
+              onGround: true, landed: false, crashed: false, vs: 0, rollRate: 0 };
+  }
   particles = []; flashes = []; floaters = [];
   clouds = [];
   for (let i = 0; i < 16; i++) clouds.push({ x: rand(0, W + 320), y: rand(20, 230), s: rand(0.5, 1.4), layer: Math.random() < 0.5 ? 0.25 : 0.5 });
@@ -363,6 +374,7 @@ function showBriefing(n) {
   document.getElementById('briefTitle').textContent = 'NIVEL ' + n;
   document.getElementById('briefMsg').textContent = missionMsg;
   document.getElementById('briefWind').textContent = wind > 0 ? ('VIENTO: ' + wind + ' km/h') : 'VIENTO: CALMA';
+  document.getElementById('briefApproach').style.display = levelConfig(n).approach ? 'block' : 'none';
   hideAll();
   document.getElementById('briefingScreen').classList.remove('hidden');
   state = 'briefing';
@@ -429,6 +441,7 @@ function updateFx(dt) {
 }
 
 /* ---------------- Física de vuelo ---------------- */
+function stallSpeedOf(p) { return 235 - p.flaps * 35; }
 function touchdown(vs, th) {
   const p = plane;
   p.y = th;
@@ -438,10 +451,11 @@ function touchdown(vs, th) {
   const vsMs = vs / 2;
   if (!p.gearDown) { crash('Tren de aterrizaje arriba'); return; }
   if (p.flaps < 1) { crash('Flaps insuficientes'); return; }
-  if (vsMs < -5.5) { crash('Velocidad vertical excesiva (' + vsMs.toFixed(1) + ' m/s)'); return; }
+  if (vsMs < -4.5) { crash('Velocidad vertical excesiva (' + vsMs.toFixed(1) + ' m/s)'); return; }
   if (p.speed > 330) { crash('Velocidad demasiado alta (' + Math.round(p.speed) + ' km/h)'); return; }
+  if (p.speed < stallSpeedOf(p) + 5) { crash('Tocaste demasiado lento: el avión se desplomó'); return; }
   if (p.pitch < -7 || p.pitch > 9) { crash('Ángulo de morro incorrecto'); return; }
-  if (Math.abs(p.bank) > 10) { crash('Alabeo excesivo'); return; }
+  if (Math.abs(p.bank) > 10) { crash('Alabeo excesivo: ala tocando el suelo'); return; }
   p.onGround = true; p.landed = true;
   const bonus = Math.round(500 + clamp((-vsMs) * 55, 0, 280) + clamp((330 - p.speed) * 1.1, 0, 180));
   score += bonus;
@@ -468,16 +482,23 @@ function update(dt) {
   /* Morro (pitch) con inercia de bombardero pesado */
   if (pUp) p.pitch += 30 * dt;
   if (pDn) p.pitch -= 30 * dt;
-  if (!pUp && !pDn) p.pitch -= Math.sign(p.pitch) * Math.min(Math.abs(p.pitch), 2.5 * dt);
+  if (!pUp && !pDn) p.pitch -= Math.sign(p.pitch) * Math.min(Math.abs(p.pitch), 7 * dt);
   p.pitch = clamp(p.pitch, -18, 22);
 
-  /* Balanceo (alabeo) + viento y turbulencia */
-  if (bL) p.bank -= 55 * dt;
-  if (bR) p.bank += 55 * dt;
+  /* Balanceo (alabeo) con inercia: cuesta meterlo y cuesta sacarlo.
+     Si sueltas los mandos, el avión se queda escorado y pierde altura. */
+  if (bL) p.rollRate -= 105 * dt;
+  if (bR) p.rollRate += 105 * dt;
+  if (!bL && !bR) p.rollRate *= Math.pow(0.12, dt); // amortiguación lenta
+  p.rollRate = clamp(p.rollRate, -75, 75);
+  p.bank += p.rollRate * dt;
+  /* Estabilidad: tendencia muy débil a nivelarse + viento/turbulencia */
+  p.bank -= Math.sign(p.bank) * Math.min(Math.abs(p.bank), 3.5 * dt);
   p.bank += (Math.sin(time * 0.8) * wind * 0.5 + Math.sin(time * 2.1) * wind * 0.25) * dt * 0.6;
-  p.bank = clamp(p.bank, -45, 45);
+  p.bank = clamp(p.bank, -55, 55);
+  if (Math.abs(p.bank) >= 54.5) p.rollRate *= 0.5;
 
-  const stallSpeed = 235 - p.flaps * 35;
+  const stallSpeed = stallSpeedOf(p);
   const rotateSpeed = stallSpeed + 45;
 
   /* Aerodinámica: empuje - resistencia - componente de gravedad */
@@ -510,7 +531,8 @@ function update(dt) {
       stallBeepT -= dt;
       if (stallBeepT <= 0) { stallBeepT = 0.35; Sound.stallBeep(); }
     }
-    let vs = Math.sin(p.pitch * Math.PI / 180) * pxPerSec * 0.95 - Math.abs(p.bank) * 0.85;
+    /* Un alabeo fuerte hace caer el morro: hay que corregirlo, no ignorarlo */
+    let vs = Math.sin(p.pitch * Math.PI / 180) * pxPerSec * 0.95 - Math.abs(p.bank) * 1.15;
     if (stalling) vs -= 115;
     p.vs = vs;
     p.y += vs * dt;
@@ -853,9 +875,10 @@ function drawHUD() {
 
   /* Avisos */
   const warns = [];
-  if (!p.onGround && p.speed < (235 - p.flaps * 35) + 8) warns.push('¡STALL! ¡PÉRDIDA DE SUSTENTACIÓN!');
+  if (!p.onGround && p.speed < stallSpeedOf(p) + 12) warns.push('¡STALL! ¡PÉRDIDA DE SUSTENTACIÓN!');
   if (!p.onGround && p.y > 140 && p.gearDown) warns.push('SUBE EL TREN (G)');
   if (p.x > landRunway.x - 1600 && p.flaps === 0) warns.push('CONFIGURA FLAPS (F)');
+  if (p.x > landRunway.x - 1600 && !p.gearDown && p.y < 120) warns.push('BAJA EL TREN (G)');
   if (p.x > landRunway.x - 1400 && p.speed > 330) warns.push('REDUCE VELOCIDAD');
   if (!p.onGround && p.y < 50 && p.vs < -55) warns.push('¡PULL UP!');
   if (Math.abs(p.bank) > 25) warns.push('¡BALANCEO!');
