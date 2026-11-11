@@ -1,0 +1,935 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>TU-95 · Simulador de Vuelo</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  html, body { height:100%; }
+  body {
+    background:#0b0f14;
+    background-image:radial-gradient(1200px 600px at 50% -10%, #1c2b3a 0%, #0b0f14 60%);
+    font-family:'Segoe UI', system-ui, -apple-system, sans-serif;
+    color:#e8eef4;
+    display:flex; flex-direction:column; align-items:center; justify-content:center;
+    min-height:100vh; padding:14px; overflow:hidden;
+  }
+  #wrap { position:relative; width:min(960px, 100%); }
+  canvas {
+    width:100%; height:auto; display:block; border-radius:10px;
+    box-shadow:0 24px 60px rgba(0,0,0,.65), 0 0 0 1px rgba(255,255,255,.09);
+    background:#6fa8cf; touch-action:none;
+  }
+  .overlay {
+    position:absolute; inset:0; z-index:10;
+    display:flex; flex-direction:column; align-items:center; justify-content:center;
+    text-align:center; padding:24px; border-radius:10px;
+    background:linear-gradient(180deg, rgba(6,10,16,.84), rgba(6,10,16,.66));
+    backdrop-filter:blur(3px);
+  }
+  .hidden { display:none !important; }
+  .overlay h1 {
+    font-size:clamp(38px, 8vw, 72px); font-weight:900; letter-spacing:.08em;
+    color:#ffd34d; text-shadow:0 4px 0 rgba(122,77,0,.9), 0 12px 34px rgba(0,0,0,.7);
+  }
+  .overlay h2 {
+    font-size:clamp(14px, 3vw, 21px); letter-spacing:.42em;
+    color:#9fd8ff; margin-top:2px; font-weight:700;
+  }
+  .overlay p { max-width:580px; margin-top:14px; line-height:1.55; color:#dbe6ef; font-size:clamp(13px, 2.4vw, 16px); }
+  .overlay p.tip { color:#9fb4c8; font-size:13px; }
+  .controls-grid {
+    display:grid; grid-template-columns:repeat(auto-fit, minmax(220px, 1fr));
+    gap:8px 24px; margin-top:18px; text-align:left;
+    font-size:14px; color:#cfe0ee; max-width:640px; width:100%;
+  }
+  .controls-grid b { color:#ffd34d; }
+  .btn {
+    margin-top:24px; padding:14px 44px; font-size:19px; font-weight:800; letter-spacing:.12em;
+    color:#1a1206; background:linear-gradient(180deg,#ffe27a,#f5b81e);
+    border:none; border-radius:8px; cursor:pointer;
+    box-shadow:0 6px 0 #9a6b00, 0 14px 30px rgba(0,0,0,.5);
+    transition:transform .08s, box-shadow .08s;
+  }
+  .btn:hover { transform:translateY(-2px); }
+  .btn:active { transform:translateY(3px); box-shadow:0 2px 0 #9a6b00; }
+  .record-line { margin-top:16px; font-family:monospace; color:#9fd8ff; letter-spacing:.12em; font-size:14px; }
+  .stats { display:flex; gap:34px; margin-top:18px; font-family:monospace; flex-wrap:wrap; justify-content:center; }
+  .stats .num { font-size:32px; font-weight:800; color:#ffd34d; }
+  .stats .lbl { font-size:11px; letter-spacing:.22em; color:#9fb4c8; margin-top:2px; }
+  #touchControls {
+    position:absolute; left:0; right:0; bottom:0; z-index:6;
+    display:none; justify-content:space-between; align-items:flex-end;
+    padding:12px; pointer-events:none;
+  }
+  @media (pointer:coarse) { #touchControls { display:flex; } }
+  .cluster { display:flex; gap:8px; align-items:flex-end; }
+  .cluster button {
+    pointer-events:auto; width:60px; height:60px; border-radius:50%;
+    border:2px solid rgba(255,255,255,.35); background:rgba(10,16,24,.55);
+    color:#fff; font-size:18px; font-weight:700;
+    display:flex; align-items:center; justify-content:center;
+    backdrop-filter:blur(2px); cursor:pointer; user-select:none; -webkit-user-select:none;
+    touch-action:none;
+  }
+  .cluster button.small { font-size:11px; letter-spacing:.03em; }
+  .cluster button:active { background:rgba(255,180,60,.5); }
+  #hint { margin-top:10px; text-align:center; font-size:12px; color:#7d93a8; letter-spacing:.06em; }
+</style>
+</head>
+<body>
+
+<div id="wrap">
+  <canvas id="game" width="960" height="540"></canvas>
+
+  <div id="touchControls">
+    <div class="cluster">
+      <button id="tBankL" aria-label="Balanceo izquierda">◀</button>
+      <button id="tPitchD" aria-label="Morro abajo">▼</button>
+      <button id="tPitchU" aria-label="Morro arriba">▲</button>
+      <button id="tBankR" aria-label="Balanceo derecha">▶</button>
+    </div>
+    <div class="cluster">
+      <button id="tThrD" class="small" aria-label="Reducir aceleración">THR−</button>
+      <button id="tFlaps" class="small" aria-label="Flaps">FLAPS</button>
+      <button id="tGear" class="small" aria-label="Tren de aterrizaje">TREN</button>
+      <button id="tThrU" class="small" aria-label="Aumentar aceleración">THR+</button>
+    </div>
+  </div>
+
+  <div id="titleScreen" class="overlay">
+    <h1>TU-95</h1>
+    <h2>SIMULADOR DE VUELO</h2>
+    <p>Pilota el bombardero pesado soviético Tupolev Tu-95 «Bear». Despega con éxito,
+       mantén el control en el aire contra el viento y aterriza suavemente en la pista
+       de destino. Sin mejoras ni trucos: solo tu habilidad de pilotaje.</p>
+    <div class="controls-grid">
+      <div>🎚️ <b>Aceleración:</b> W / S</div>
+      <div>🕹️ <b>Morro arriba / abajo:</b> ↑ / ↓</div>
+      <div>⚖️ <b>Balanceo:</b> ← / →</div>
+      <div>🛬 <b>Flaps:</b> F · <b>Tren:</b> G</div>
+      <div>⏸️ <b>Pausa:</b> P · 🔊 <b>Sonido:</b> M</div>
+      <div>🎯 <b>Objetivo:</b> aterrizar en la pista 27</div>
+    </div>
+    <button id="playBtn" class="btn">▶ DESPEGAR</button>
+    <div class="record-line">RÉCORD: <span id="titleRecord">0</span> PTS</div>
+  </div>
+
+  <div id="briefingScreen" class="overlay hidden">
+    <h1 id="briefTitle">NIVEL 1</h1>
+    <p id="briefMsg"></p>
+    <p id="briefWind" class="record-line"></p>
+    <div class="controls-grid">
+      <div>🎚️ <b>Aceleración:</b> W / S</div>
+      <div>🕹️ <b>Morro:</b> ↑ / ↓</div>
+      <div>⚖️ <b>Balanceo:</b> ← / →</div>
+      <div>🛬 <b>Flaps:</b> F · <b>Tren:</b> G</div>
+    </div>
+    <p class="tip">Consejo: flaps al máximo (F ×2) y tren abajo (G) para despegar y aterrizar.
+       Rota a ~210 km/h con ↑ y sube el tren (G) al ganar altura.</p>
+    <p class="tip" id="briefApproach" style="display:none; color:#ffd34d">MODO APROXIMACIÓN: empiezas ya en el aire, alineado con la pista.
+       Baja el tren (G), pon flaps (F) y desciende con ↑ ↓ suave.</p>
+    <button id="startBtn" class="btn">▶ INICIAR MISIÓN</button>
+  </div>
+
+  <div id="completeScreen" class="overlay hidden">
+    <h1>¡MISIÓN CUMPLIDA!</h1>
+    <p>Aterrizaje suave en la pista 27. El Bear regresa a casa.</p>
+    <div class="stats" id="completeStats"></div>
+    <button id="nextBtn" class="btn">▶ SIGUIENTE NIVEL</button>
+  </div>
+
+  <div id="crashScreen" class="overlay hidden">
+    <h1>ACCIDENTE</h1>
+    <p id="crashReason">El Tu-95 se estrelló.</p>
+    <div class="stats">
+      <div><div class="num" id="crashScore">0</div><div class="lbl">PUNTOS</div></div>
+    </div>
+    <button id="retryBtn" class="btn">↻ REINTENTAR NIVEL</button>
+  </div>
+
+  <div id="pauseScreen" class="overlay hidden">
+    <h1>PAUSA</h1>
+    <p>El Tu-95 espera en el aire…</p>
+    <button id="resumeBtn" class="btn">▶ CONTINUAR</button>
+  </div>
+</div>
+
+<div id="hint">TU-95 · Simulador de vuelo · HTML5 Canvas · Sin dependencias · Funciona en móvil y escritorio</div>
+
+<script>
+'use strict';
+/* ============================================================
+   TU-95 · SIMULADOR DE VUELO
+   Despega, mantén el control y aterriza. Estilo flash clásico.
+   ============================================================ */
+const canvas = document.getElementById('game');
+const ctx = canvas.getContext('2d');
+const W = canvas.width, H = canvas.height;
+const GROUND_Y = H - 90;
+const TAU = Math.PI * 2;
+const WHEEL_Y = 22; // altura de las ruedas respecto al centro del avión
+
+const rand = (a, b) => a + Math.random() * (b - a);
+const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+
+function loadRecord() { try { return parseInt(localStorage.getItem('tu95sim_record') || '0', 10) || 0; } catch (e) { return 0; } }
+function saveRecord(v) { try { localStorage.setItem('tu95sim_record', String(v)); } catch (e) {} }
+
+/* ---------------- Audio procedural (WebAudio) ---------------- */
+const Sound = {
+  ctx: null, master: null, muted: false, engineGain: null, engineOsc: null, engineOsc2: null,
+  init() {
+    if (this.ctx) { if (this.ctx.state === 'suspended') this.ctx.resume(); return; }
+    try {
+      this.ctx = new (window.AudioContext || window.webkitAudioContext)();
+      this.master = this.ctx.createGain();
+      this.master.gain.value = 0.45;
+      this.master.connect(this.ctx.destination);
+      this.startEngine();
+    } catch (e) { /* audio no disponible */ }
+  },
+  noiseBuffer() {
+    const len = this.ctx.sampleRate;
+    const buf = this.ctx.createBuffer(1, len, this.ctx.sampleRate);
+    const d = buf.getChannelData(0);
+    for (let i = 0; i < len; i++) d[i] = Math.random() * 2 - 1;
+    return buf;
+  },
+  startEngine() {
+    const c = this.ctx;
+    this.engineOsc = c.createOscillator(); this.engineOsc.type = 'sawtooth'; this.engineOsc.frequency.value = 52;
+    this.engineOsc2 = c.createOscillator(); this.engineOsc2.type = 'sawtooth'; this.engineOsc2.frequency.value = 78.3;
+    const lp = c.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 260;
+    this.engineGain = c.createGain(); this.engineGain.gain.value = 0;
+    this.engineOsc.connect(lp); this.engineOsc2.connect(lp);
+    lp.connect(this.engineGain); this.engineGain.connect(this.master);
+    this.engineOsc.start(); this.engineOsc2.start();
+  },
+  setEngine(on, throttle) {
+    if (!this.ctx || !this.engineGain) return;
+    const t = this.ctx.currentTime;
+    this.engineGain.gain.setTargetAtTime(on ? 0.03 + throttle * 0.09 : 0, t, 0.1);
+    this.engineOsc.frequency.setTargetAtTime(52 + throttle * 30, t, 0.1);
+    this.engineOsc2.frequency.setTargetAtTime(78 + throttle * 45, t, 0.1);
+  },
+  beep(freqA, freqB, dur, type, vol) {
+    if (!this.ctx || this.muted) return;
+    const c = this.ctx, t = c.currentTime;
+    const o = c.createOscillator(), g = c.createGain();
+    o.type = type || 'square';
+    o.frequency.setValueAtTime(freqA, t);
+    o.frequency.exponentialRampToValueAtTime(Math.max(30, freqB), t + dur);
+    g.gain.setValueAtTime(vol || 0.12, t);
+    g.gain.exponentialRampToValueAtTime(0.001, t + dur);
+    o.connect(g); g.connect(this.master);
+    o.start(t); o.stop(t + dur + 0.02);
+  },
+  noise(dur, vol, freqFrom, freqTo) {
+    if (!this.ctx || this.muted) return;
+    const c = this.ctx, t = c.currentTime;
+    const src = c.createBufferSource(); src.buffer = this.noiseBuffer();
+    const f = c.createBiquadFilter(); f.type = 'lowpass';
+    f.frequency.setValueAtTime(freqFrom, t);
+    f.frequency.exponentialRampToValueAtTime(Math.max(40, freqTo), t + dur);
+    const g = c.createGain();
+    g.gain.setValueAtTime(vol, t);
+    g.gain.exponentialRampToValueAtTime(0.001, t + dur);
+    src.connect(f); f.connect(g); g.connect(this.master);
+    src.start(t); src.stop(t + dur + 0.02);
+  },
+  explosion(big) { this.noise(big ? 0.9 : 0.5, big ? 0.5 : 0.3, 1200, 60); this.beep(120, 40, big ? 0.7 : 0.4, 'sine', 0.25); },
+  gear() { this.beep(140, 70, 0.18, 'square', 0.15); this.noise(0.12, 0.1, 800, 200); },
+  flap() { this.beep(300, 200, 0.08, 'square', 0.08); },
+  chime() { this.beep(880, 880, 0.12, 'sine', 0.12); setTimeout(() => this.beep(1320, 1320, 0.18, 'sine', 0.12), 110); },
+  thud() { this.noise(0.25, 0.35, 500, 80); this.beep(90, 40, 0.3, 'sine', 0.3); },
+  stallBeep() { this.beep(980, 980, 0.09, 'square', 0.07); },
+  success() { [523, 659, 784, 1046].forEach((f, i) => setTimeout(() => this.beep(f, f, 0.16, 'triangle', 0.12), i * 110)); },
+  toggleMute() { this.muted = !this.muted; if (this.master) this.master.gain.value = this.muted ? 0 : 0.45; return this.muted; }
+};
+
+/* ---------------- Entrada (teclado / táctil) ---------------- */
+const keys = {};
+const touch = { thrUp: false, thrDn: false, pUp: false, pDn: false, bL: false, bR: false };
+
+addEventListener('keydown', e => {
+  const k = e.key.toLowerCase();
+  if (['arrowup', 'arrowdown', 'arrowleft', 'arrowright', ' '].includes(k)) e.preventDefault();
+  keys[k] = true;
+  if (e.repeat) return;
+  if (k === 'f') cycleFlaps();
+  if (k === 'g') toggleGear();
+  if (k === 'p') togglePause();
+  if (k === 'm') { const m = Sound.toggleMute(); addFloater('SONIDO ' + (m ? 'OFF' : 'ON'), plane.x, 160, '#ffd34d'); }
+  if (k === 'enter') {
+    if (state === 'title') { score = 0; showBriefing(1); }
+    else if (state === 'briefing') startLevel();
+    else if (state === 'complete') showBriefing(level + 1);
+    else if (state === 'crashed') showBriefing(level);
+  }
+});
+addEventListener('keyup', e => { keys[e.key.toLowerCase()] = false; });
+
+function bindHold(id, prop) {
+  const el = document.getElementById(id);
+  el.addEventListener('pointerdown', e => { e.preventDefault(); Sound.init(); touch[prop] = true; });
+  ['pointerup', 'pointerleave', 'pointercancel'].forEach(ev => el.addEventListener(ev, () => { touch[prop] = false; }));
+}
+bindHold('tThrU', 'thrUp'); bindHold('tThrD', 'thrDn');
+bindHold('tPitchU', 'pUp'); bindHold('tPitchD', 'pDn');
+bindHold('tBankL', 'bL'); bindHold('tBankR', 'bR');
+document.getElementById('tFlaps').addEventListener('pointerdown', e => { e.preventDefault(); Sound.init(); cycleFlaps(); });
+document.getElementById('tGear').addEventListener('pointerdown', e => { e.preventDefault(); Sound.init(); toggleGear(); });
+canvas.addEventListener('contextmenu', e => e.preventDefault());
+document.addEventListener('visibilitychange', () => { if (document.hidden && state === 'playing') togglePause(); });
+
+/* ---------------- Niveles / misiones ---------------- */
+const LEVELS = [
+  { dist: 9000,  wind: 0,  runwayLen: 1000, rings: [], approach: false, msg: 'Despega de la pista 09 y aterriza suavemente en la pista 27.' },
+  { dist: 10000, wind: 6,  runwayLen: 900,  rings: [{ x: 3500, y: 190 }, { x: 6500, y: 270 }], approach: false, msg: 'Pasa por los anillos de control y aterriza en la pista 27.' },
+  { dist: 11000, wind: 8,  runwayLen: 800,  rings: [], approach: true, msg: 'Aterrizaje de precisión: ya estás en aproximación final. Configura el avión y toca suavemente.' },
+  { dist: 12000, wind: 18, runwayLen: 680,  rings: [{ x: 2800, y: 200 }, { x: 5200, y: 300 }, { x: 7600, y: 180 }, { x: 9800, y: 250 }], approach: false, msg: 'Viento fuerte y pista corta. Mantén el balanceo con ← →.' },
+  { dist: 13000, wind: 24, runwayLen: 580,  rings: [{ x: 2600, y: 280 }, { x: 4800, y: 170 }, { x: 7000, y: 320 }, { x: 9200, y: 200 }, { x: 11200, y: 260 }], approach: false, msg: 'Misión extrema. Solo pilotos expertos.' }
+];
+function levelConfig(n) {
+  if (n <= LEVELS.length) return LEVELS[n - 1];
+  const extra = n - LEVELS.length;
+  const approach = extra % 2 === 0;
+  return {
+    dist: 13000 + extra * 500,
+    wind: Math.min(34, 24 + extra * 3),
+    runwayLen: Math.max(420, 580 - extra * 40),
+    rings: approach ? [] : LEVELS[4].rings.map(r => ({ x: r.x + extra * 120, y: clamp(r.y + rand(-40, 40), 120, 340) })),
+    approach,
+    msg: approach ? 'Aterrizaje de precisión con viento fuerte.' : 'Misión extrema. Solo pilotos expertos.'
+  };
+}
+
+/* ---------------- Estado del juego ---------------- */
+let state = 'title';
+let level = 1, score = 0, record = loadRecord(), levelStartScore = 0, levelTime = 0;
+let time = 0, camX = 0, shake = 0;
+let plane, rings = [], particles = [], flashes = [], floaters = [], clouds = [];
+let startRunway, landRunway, worldLen = 10000, wind = 0, missionMsg = '';
+let stallBeepT = 0, takeoffDone = false;
+
+function resetLevel(n) {
+  const cfg = levelConfig(n);
+  wind = cfg.wind; missionMsg = cfg.msg;
+  startRunway = { x: 300, len: cfg.runwayLen };
+  landRunway = { x: cfg.dist, len: cfg.runwayLen };
+  worldLen = cfg.dist + cfg.runwayLen + 700;
+  rings = cfg.rings.map(r => ({ x: r.x, y: r.y, r: 48, passed: false }));
+  if (cfg.approach) {
+    /* Aproximación final: ya en vuelo, rumbo a la pista, configuración en tránsito */
+    plane = { x: landRunway.x - 2400, y: 250, speed: 265, pitch: 1, bank: 0, throttle: 0.5, flaps: 1, gearDown: false,
+              onGround: false, landed: false, crashed: false, vs: 0, rollRate: 0 };
+  } else {
+    plane = { x: startRunway.x + 90, y: 0, speed: 0, pitch: 0, bank: 0, throttle: 0, flaps: 0, gearDown: true,
+              onGround: true, landed: false, crashed: false, vs: 0, rollRate: 0 };
+  }
+  particles = []; flashes = []; floaters = [];
+  clouds = [];
+  for (let i = 0; i < 16; i++) clouds.push({ x: rand(0, W + 320), y: rand(20, 230), s: rand(0.5, 1.4), layer: Math.random() < 0.5 ? 0.25 : 0.5 });
+  camX = 0; shake = 0; levelTime = 0; takeoffDone = false; stallBeepT = 0;
+  levelStartScore = score;
+}
+resetLevel(1);
+
+function terrainH(x) {
+  const a = startRunway.x + startRunway.len + 150;
+  const b = landRunway.x - 150;
+  if (x < a || x > b) return 0;
+  const t = clamp((x - a) / Math.max(1, b - a), 0, 1);
+  const h = Math.abs(Math.sin(x * 0.004)) * 38 + Math.abs(Math.sin(x * 0.011 + 1.7)) * 22 + Math.abs(Math.sin(x * 0.0023 + 0.5)) * 26;
+  return Math.min(70, h) * Math.sin(t * Math.PI);
+}
+function onRunway(x) {
+  return (x >= startRunway.x - 20 && x <= startRunway.x + startRunway.len + 20) ||
+         (x >= landRunway.x - 20 && x <= landRunway.x + landRunway.len + 20);
+}
+
+function cycleFlaps() {
+  if (state !== 'playing') return;
+  plane.flaps = (plane.flaps + 1) % 3;
+  Sound.flap();
+  addFloater('FLAPS ' + plane.flaps, plane.x, 150, '#9fd8ff', 14);
+}
+function toggleGear() {
+  if (state !== 'playing') return;
+  plane.gearDown = !plane.gearDown;
+  Sound.gear();
+  addFloater(plane.gearDown ? 'TREN ABAJO' : 'TREN ARRIBA', plane.x, 150, '#9fd8ff', 14);
+}
+function addFloater(text, x, y, color, size) {
+  floaters.push({ text, x, y, color: color || '#fff', size: size || 15, t: 0 });
+}
+
+/* ---------------- Flujo de pantallas ---------------- */
+function hideAll() { ['titleScreen', 'briefingScreen', 'completeScreen', 'crashScreen', 'pauseScreen'].forEach(id => document.getElementById(id).classList.add('hidden')); }
+function showBriefing(n) {
+  level = n;
+  resetLevel(n);
+  document.getElementById('briefTitle').textContent = 'NIVEL ' + n;
+  document.getElementById('briefMsg').textContent = missionMsg;
+  document.getElementById('briefWind').textContent = wind > 0 ? ('VIENTO: ' + wind + ' km/h') : 'VIENTO: CALMA';
+  document.getElementById('briefApproach').style.display = levelConfig(n).approach ? 'block' : 'none';
+  hideAll();
+  document.getElementById('briefingScreen').classList.remove('hidden');
+  state = 'briefing';
+}
+function startLevel() {
+  Sound.init();
+  hideAll();
+  state = 'playing';
+}
+function togglePause() {
+  if (state === 'playing') {
+    state = 'paused';
+    document.getElementById('pauseScreen').classList.remove('hidden');
+    Sound.setEngine(false, 0);
+  } else if (state === 'paused') {
+    state = 'playing';
+    document.getElementById('pauseScreen').classList.add('hidden');
+  }
+}
+function crash(reason) {
+  if (plane.crashed) return;
+  plane.crashed = true;
+  state = 'crashed';
+  explode(plane.x, plane.y + 10, 130, true);
+  Sound.setEngine(false, 0);
+  score = levelStartScore;
+  if (score > record) { record = score; saveRecord(record); }
+  document.getElementById('crashReason').textContent = reason;
+  document.getElementById('crashScore').textContent = score;
+  setTimeout(() => { if (state === 'crashed') document.getElementById('crashScreen').classList.remove('hidden'); }, 900);
+}
+function levelComplete() {
+  state = 'complete';
+  Sound.setEngine(false, 0);
+  Sound.success();
+  if (score > record) { record = score; saveRecord(record); }
+  const passed = rings.filter(r => r.passed).length;
+  document.getElementById('completeStats').innerHTML =
+    '<div><div class="num">' + score + '</div><div class="lbl">PUNTOS</div></div>' +
+    '<div><div class="num">' + passed + '/' + rings.length + '</div><div class="lbl">ANILLOS</div></div>' +
+    '<div><div class="num">' + levelTime.toFixed(0) + 's</div><div class="lbl">TIEMPO</div></div>';
+  document.getElementById('completeScreen').classList.remove('hidden');
+}
+
+/* ---------------- Efectos ---------------- */
+function explode(x, y, radius, big) {
+  flashes.push({ x, y, r: 12, maxR: radius * 1.4, t: 0 });
+  const n = big ? 40 : 24;
+  for (let i = 0; i < n; i++) {
+    const a = rand(0, TAU), sp = rand(20, big ? 260 : 170);
+    particles.push({ x, y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp, life: rand(0.4, 1.2), maxLife: 1.2, size: rand(2, big ? 7 : 5), color: ['#ffdd55', '#ff9933', '#ff5522', '#888888', '#555555'][Math.floor(rand(0, 5))] });
+  }
+  shake = Math.min(18, shake + (big ? 12 : 6));
+  Sound.explosion(big);
+}
+function updateFx(dt) {
+  for (const p of particles) { p.life -= dt; p.x += p.vx * dt; p.y += p.vy * dt; p.vy -= 70 * dt; }
+  particles = particles.filter(p => p.life > 0);
+  for (const fl of flashes) { fl.t += dt * 2.2; fl.r = fl.maxR * (1 - Math.pow(1 - Math.min(1, fl.t), 2)); }
+  flashes = flashes.filter(fl => fl.t < 1);
+  for (const fl of floaters) { fl.t += dt; fl.y += 28 * dt; }
+  floaters = floaters.filter(fl => fl.t < 1.4);
+  shake = Math.max(0, shake - 30 * dt);
+}
+
+/* ---------------- Física de vuelo ---------------- */
+function stallSpeedOf(p) { return 235 - p.flaps * 35; }
+function touchdown(vs, th) {
+  const p = plane;
+  p.y = th;
+  if (th > 2) { crash('Impacto contra el terreno'); return; }
+  const onLand = p.x >= landRunway.x && p.x <= landRunway.x + landRunway.len;
+  if (!onLand) { crash('Aterrizaje fuera de pista'); return; }
+  const vsMs = vs / 2;
+  if (!p.gearDown) { crash('Tren de aterrizaje arriba'); return; }
+  if (p.flaps < 1) { crash('Flaps insuficientes'); return; }
+  if (vsMs < -4.5) { crash('Velocidad vertical excesiva (' + vsMs.toFixed(1) + ' m/s)'); return; }
+  if (p.speed > 330) { crash('Velocidad demasiado alta (' + Math.round(p.speed) + ' km/h)'); return; }
+  if (p.speed < stallSpeedOf(p) + 5) { crash('Tocaste demasiado lento: el avión se desplomó'); return; }
+  if (p.pitch < -7 || p.pitch > 9) { crash('Ángulo de morro incorrecto'); return; }
+  if (Math.abs(p.bank) > 10) { crash('Alabeo excesivo: ala tocando el suelo'); return; }
+  p.onGround = true; p.landed = true;
+  const bonus = Math.round(500 + clamp((-vsMs) * 55, 0, 280) + clamp((330 - p.speed) * 1.1, 0, 180));
+  score += bonus;
+  Sound.thud();
+  addFloater('¡ATERIZAJE! +' + bonus, p.x, 130, '#7CFC00', 22);
+}
+
+function update(dt) {
+  time += dt; levelTime += dt;
+  const p = plane;
+
+  const thrUp = keys['w'] || keys['shift'] || touch.thrUp;
+  const thrDn = keys['s'] || touch.thrDn;
+  const pUp = keys['arrowup'] || touch.pUp;
+  const pDn = keys['arrowdown'] || touch.pDn;
+  const bL = keys['arrowleft'] || touch.bL;
+  const bR = keys['arrowright'] || touch.bR;
+
+  /* Aceleración (throttle) */
+  if (thrUp) p.throttle += 0.55 * dt;
+  if (thrDn) p.throttle -= 0.55 * dt;
+  p.throttle = clamp(p.throttle, 0, 1);
+
+  /* Morro (pitch) con inercia de bombardero pesado */
+  if (pUp) p.pitch += 30 * dt;
+  if (pDn) p.pitch -= 30 * dt;
+  if (!pUp && !pDn) p.pitch -= Math.sign(p.pitch) * Math.min(Math.abs(p.pitch), 7 * dt);
+  p.pitch = clamp(p.pitch, -18, 22);
+
+  /* Balanceo (alabeo) con inercia: cuesta meterlo y cuesta sacarlo.
+     Si sueltas los mandos, el avión se queda escorado y pierde altura. */
+  if (bL) p.rollRate -= 105 * dt;
+  if (bR) p.rollRate += 105 * dt;
+  if (!bL && !bR) p.rollRate *= Math.pow(0.12, dt); // amortiguación lenta
+  p.rollRate = clamp(p.rollRate, -75, 75);
+  p.bank += p.rollRate * dt;
+  /* Estabilidad: tendencia muy débil a nivelarse + viento/turbulencia */
+  p.bank -= Math.sign(p.bank) * Math.min(Math.abs(p.bank), 3.5 * dt);
+  p.bank += (Math.sin(time * 0.8) * wind * 0.5 + Math.sin(time * 2.1) * wind * 0.25) * dt * 0.6;
+  p.bank = clamp(p.bank, -55, 55);
+  if (Math.abs(p.bank) >= 54.5) p.rollRate *= 0.5;
+
+  const stallSpeed = stallSpeedOf(p);
+  const rotateSpeed = stallSpeed + 45;
+
+  /* Aerodinámica: empuje - resistencia - componente de gravedad */
+  const dragFactor = 1 + p.flaps * 0.32 + (p.gearDown ? 0.22 : 0);
+  let acc = p.throttle * 95 - p.speed * 0.085 * dragFactor - Math.sin(p.pitch * Math.PI / 180) * 150;
+  if (p.onGround) {
+    acc -= 16;
+    if (!onRunway(p.x)) acc -= 38; // hierba
+  }
+  p.speed = clamp(p.speed + acc * dt, 0, 1150);
+  const pxPerSec = p.speed * 0.55;
+  p.x = Math.min(p.x + pxPerSec * dt, worldLen - 40);
+
+  if (p.landed) {
+    p.speed = Math.max(0, p.speed - 55 * dt);
+    p.y = terrainH(p.x);
+    if (p.speed < 40) levelComplete();
+  } else if (p.onGround) {
+    p.y = terrainH(p.x);
+    if (p.speed > rotateSpeed && p.pitch > 3) {
+      p.onGround = false;
+      if (!takeoffDone) { takeoffDone = true; score += 100; addFloater('¡DESPEGUE! +100', p.x, 150, '#7CFC00', 20); }
+    }
+    if (p.speed < 25 && !onRunway(p.x) && p.x > startRunway.x + startRunway.len) crash('Te detuviste fuera de pista');
+    if (p.x > worldLen - 90) crash('Saliste de la pista');
+  } else {
+    const stalling = p.speed < stallSpeed;
+    if (stalling) {
+      p.pitch -= 22 * dt;
+      stallBeepT -= dt;
+      if (stallBeepT <= 0) { stallBeepT = 0.35; Sound.stallBeep(); }
+    }
+    /* Un alabeo fuerte hace caer el morro: hay que corregirlo, no ignorarlo */
+    let vs = Math.sin(p.pitch * Math.PI / 180) * pxPerSec * 0.95 - Math.abs(p.bank) * 1.15;
+    if (stalling) vs -= 115;
+    p.vs = vs;
+    p.y += vs * dt;
+    if (p.y > 410) p.y = 410;
+    const th = terrainH(p.x);
+    if (p.y <= th) touchdown(vs, th);
+    for (const r of rings) {
+      if (!r.passed && (p.x - r.x) ** 2 + (p.y - r.y) ** 2 < (r.r + 8) ** 2) {
+        r.passed = true; score += 200; Sound.chime();
+        addFloater('ANILLO +200', r.x, r.y + 60, '#7CFC00', 18);
+      }
+    }
+  }
+
+  camX = clamp(p.x - W * 0.35, 0, Math.max(0, worldLen - W));
+  Sound.setEngine(true, p.throttle);
+  updateFx(dt);
+}
+
+/* ---------------- Dibujo ---------------- */
+function drawStar(x, y, r, color) {
+  ctx.fillStyle = color;
+  ctx.beginPath();
+  for (let i = 0; i < 10; i++) {
+    const a = -Math.PI / 2 + i * Math.PI / 5, rr = i % 2 ? r * 0.45 : r;
+    const px = x + Math.cos(a) * rr, py = y + Math.sin(a) * rr;
+    if (i) ctx.lineTo(px, py); else ctx.moveTo(px, py);
+  }
+  ctx.closePath(); ctx.fill();
+}
+function drawSky() {
+  const g = ctx.createLinearGradient(0, 0, 0, H);
+  g.addColorStop(0, '#2e5f8a'); g.addColorStop(0.45, '#6fa8cf'); g.addColorStop(0.8, '#cfe6f2'); g.addColorStop(1, '#e8f2f8');
+  ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+  const sg = ctx.createRadialGradient(W - 150, 86, 8, W - 150, 86, 90);
+  sg.addColorStop(0, 'rgba(255,240,180,0.95)'); sg.addColorStop(0.25, 'rgba(255,220,120,0.5)'); sg.addColorStop(1, 'rgba(255,220,120,0)');
+  ctx.fillStyle = sg; ctx.beginPath(); ctx.arc(W - 150, 86, 90, 0, TAU); ctx.fill();
+  ctx.fillStyle = '#fff3c4'; ctx.beginPath(); ctx.arc(W - 150, 86, 26, 0, TAU); ctx.fill();
+}
+function drawClouds() {
+  ctx.fillStyle = 'rgba(255,255,255,0.85)';
+  for (const c of clouds) {
+    let sx = (c.x - camX * c.layer) % (W + 320);
+    if (sx < 0) sx += W + 320;
+    sx -= 160;
+    ctx.save(); ctx.translate(sx, c.y); ctx.scale(c.s, c.s);
+    ctx.beginPath();
+    ctx.ellipse(0, 0, 42, 13, 0, 0, TAU);
+    ctx.ellipse(-30, 4, 26, 10, 0, 0, TAU);
+    ctx.ellipse(30, 4, 28, 11, 0, 0, TAU);
+    ctx.ellipse(6, -8, 24, 11, 0, 0, TAU);
+    ctx.fill(); ctx.restore();
+  }
+}
+function drawMountains() {
+  ctx.fillStyle = 'rgba(90,120,150,0.55)';
+  ctx.beginPath(); ctx.moveTo(0, GROUND_Y);
+  const off = camX * 0.12;
+  for (let x = 0; x <= W; x += 16) {
+    const y = GROUND_Y - 70 - Math.abs(Math.sin((x + off) * 0.008)) * 70 - Math.abs(Math.sin((x + off) * 0.021)) * 30;
+    ctx.lineTo(x, y);
+  }
+  ctx.lineTo(W, GROUND_Y); ctx.closePath(); ctx.fill();
+  ctx.fillStyle = 'rgba(70,100,130,0.5)';
+  ctx.beginPath(); ctx.moveTo(0, GROUND_Y);
+  const off2 = camX * 0.25;
+  for (let x = 0; x <= W; x += 16) {
+    const y = GROUND_Y - 34 - Math.abs(Math.sin((x + off2) * 0.011 + 2)) * 44;
+    ctx.lineTo(x, y);
+  }
+  ctx.lineTo(W, GROUND_Y); ctx.closePath(); ctx.fill();
+}
+function drawRunway(rw, num) {
+  const x1 = rw.x - camX, x2 = rw.x + rw.len - camX;
+  if (x2 < -60 || x1 > W + 60) return;
+  ctx.fillStyle = '#3f444a'; ctx.fillRect(x1, GROUND_Y - 8, rw.len, 10);
+  ctx.fillStyle = '#565d64'; ctx.fillRect(x1, GROUND_Y - 8, rw.len, 2);
+  ctx.fillStyle = '#f2f2f2';
+  for (let i = 0; i < 5; i++) ctx.fillRect(x1 + 3, GROUND_Y - 7 + i * 1.8, 10, 1.2);
+  let start = x1 + (((-camX) % 60) + 60) % 60;
+  for (let x = start; x < x2; x += 60) ctx.fillRect(x, GROUND_Y - 4, 34, 2);
+  ctx.fillStyle = '#ffd34d';
+  for (let x = x1 + 20; x < x2; x += 80) { ctx.beginPath(); ctx.arc(x, GROUND_Y - 11, 2, 0, TAU); ctx.fill(); }
+  ctx.fillStyle = 'rgba(255,255,255,0.85)'; ctx.font = 'bold 20px monospace'; ctx.textAlign = 'center';
+  ctx.fillText(num, x1 + rw.len / 2, GROUND_Y + 24);
+}
+function drawWindsock() {
+  const wx = landRunway.x - 70 - camX;
+  if (wx < -60 || wx > W + 60) return;
+  ctx.strokeStyle = '#cccccc'; ctx.lineWidth = 2;
+  ctx.beginPath(); ctx.moveTo(wx, GROUND_Y); ctx.lineTo(wx, GROUND_Y - 46); ctx.stroke();
+  const dir = wind > 0 ? -1 : 1;
+  const droop = clamp(1 - wind / 30, 0.15, 1);
+  ctx.fillStyle = '#ff7722';
+  ctx.beginPath();
+  ctx.moveTo(wx, GROUND_Y - 46);
+  ctx.lineTo(wx + dir * 26, GROUND_Y - 46 + (1 - droop) * 10);
+  ctx.lineTo(wx, GROUND_Y - 40);
+  ctx.closePath(); ctx.fill();
+  ctx.lineWidth = 1;
+}
+function drawTerrain() {
+  ctx.beginPath();
+  ctx.moveTo(-20, GROUND_Y + 80);
+  for (let sx = -20; sx <= W + 20; sx += 14) ctx.lineTo(sx, GROUND_Y - terrainH(sx + camX));
+  ctx.lineTo(W + 20, GROUND_Y + 80);
+  ctx.closePath();
+  const g = ctx.createLinearGradient(0, GROUND_Y - 70, 0, H);
+  g.addColorStop(0, '#7a9a4e'); g.addColorStop(1, '#3d5a26');
+  ctx.fillStyle = g; ctx.fill();
+  ctx.strokeStyle = '#8fb45e'; ctx.lineWidth = 3;
+  ctx.beginPath();
+  for (let sx = -20; sx <= W + 20; sx += 14) {
+    const y = GROUND_Y - terrainH(sx + camX);
+    if (sx === -20) ctx.moveTo(sx, y); else ctx.lineTo(sx, y);
+  }
+  ctx.stroke(); ctx.lineWidth = 1;
+  drawRunway(startRunway, '09');
+  drawRunway(landRunway, '27');
+  drawWindsock();
+}
+function drawRings() {
+  for (const r of rings) {
+    const sx = r.x - camX, sy = GROUND_Y - r.y;
+    if (sx < -80 || sx > W + 80) continue;
+    const pulse = 1 + Math.sin(time * 3) * 0.05;
+    ctx.save(); ctx.translate(sx, sy); ctx.scale(pulse, pulse);
+    ctx.strokeStyle = r.passed ? '#7CFC00' : '#ffd34d';
+    ctx.lineWidth = 4; ctx.setLineDash([14, 10]);
+    ctx.beginPath(); ctx.arc(0, 0, r.r, 0, TAU); ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.fillStyle = r.passed ? 'rgba(124,252,0,0.12)' : 'rgba(255,211,77,0.10)';
+    ctx.beginPath(); ctx.arc(0, 0, r.r, 0, TAU); ctx.fill();
+    ctx.restore();
+  }
+}
+
+function drawPlane() {
+  const p = plane;
+  if (p.crashed) return;
+  const sx = p.x - camX, sy = GROUND_Y - p.y - WHEEL_Y;
+  ctx.save(); ctx.translate(sx, sy);
+  ctx.rotate(p.pitch * Math.PI / 180);
+  ctx.scale(Math.cos(p.bank * 0.35 * Math.PI / 180), 1);
+
+  /* Ala principal */
+  ctx.fillStyle = '#9aa6b1';
+  ctx.beginPath(); ctx.moveTo(-4, 5); ctx.lineTo(20, 5); ctx.lineTo(10, 17); ctx.lineTo(-16, 17); ctx.closePath(); ctx.fill();
+  ctx.strokeStyle = 'rgba(40,50,60,0.5)'; ctx.stroke();
+  /* Flaps desplegados */
+  if (p.flaps > 0) {
+    ctx.fillStyle = '#8a97a3';
+    ctx.save(); ctx.translate(-14, 16); ctx.rotate(p.flaps * 0.28);
+    ctx.fillRect(-16, 0, 30, 4); ctx.restore();
+  }
+  /* Estabilizador horizontal */
+  ctx.beginPath(); ctx.moveTo(-56, 4); ctx.lineTo(-44, 4); ctx.lineTo(-50, 12); ctx.lineTo(-60, 12); ctx.closePath(); ctx.fill();
+
+  /* Fuselaje */
+  ctx.beginPath();
+  ctx.moveTo(-58, -3);
+  ctx.quadraticCurveTo(-34, -9, 8, -9);
+  ctx.quadraticCurveTo(38, -9, 52, -4);
+  ctx.quadraticCurveTo(60, 0, 52, 4);
+  ctx.quadraticCurveTo(34, 9, -6, 9);
+  ctx.quadraticCurveTo(-38, 9, -58, 3);
+  ctx.closePath();
+  const g = ctx.createLinearGradient(0, -10, 0, 10);
+  g.addColorStop(0, '#eef2f6'); g.addColorStop(0.45, '#c3ccd4'); g.addColorStop(1, '#828e99');
+  ctx.fillStyle = g; ctx.fill();
+  ctx.strokeStyle = 'rgba(40,50,60,0.65)'; ctx.lineWidth = 1; ctx.stroke();
+
+  /* Morro / radomo */
+  ctx.fillStyle = '#aeb9c2';
+  ctx.beginPath(); ctx.moveTo(44, -6); ctx.quadraticCurveTo(60, 0, 44, 6); ctx.quadraticCurveTo(40, 0, 44, -6); ctx.fill();
+  /* Cabina */
+  ctx.fillStyle = '#16242f';
+  ctx.beginPath(); ctx.moveTo(28, -8); ctx.quadraticCurveTo(40, -8, 44, -4); ctx.lineTo(28, -4); ctx.closePath(); ctx.fill();
+  ctx.fillStyle = 'rgba(140,190,230,0.8)'; ctx.fillRect(30, -7, 10, 2);
+  /* Líneas de panel */
+  ctx.strokeStyle = 'rgba(90,105,120,0.5)';
+  for (let i = 0; i < 5; i++) { ctx.beginPath(); ctx.moveTo(-40 + i * 18, -8); ctx.lineTo(-40 + i * 18, 8); ctx.stroke(); }
+
+  /* 4 turborreactores con hélices contrarrotantes */
+  const engines = [-10, 0, 10, 20];
+  for (const ex of engines) {
+    ctx.fillStyle = '#7d8894';
+    ctx.beginPath(); ctx.ellipse(ex, 11, 9, 4.5, 0, 0, TAU); ctx.fill();
+    ctx.strokeStyle = 'rgba(40,50,60,0.6)'; ctx.stroke();
+    const spin = time * 40 + ex;
+    ctx.fillStyle = 'rgba(220,228,235,0.35)';
+    ctx.beginPath(); ctx.ellipse(ex + 9, 11, 2.2, 11, 0, 0, TAU); ctx.fill();
+    ctx.strokeStyle = 'rgba(60,70,80,0.7)'; ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(ex + 9, 11 - Math.abs(Math.sin(spin)) * 11);
+    ctx.lineTo(ex + 9, 11 + Math.abs(Math.sin(spin)) * 11);
+    ctx.stroke(); ctx.lineWidth = 1;
+  }
+
+  /* Deriva vertical */
+  ctx.fillStyle = '#c3ccd4';
+  ctx.beginPath(); ctx.moveTo(-56, -3); ctx.lineTo(-47, -18); ctx.lineTo(-36, -18); ctx.lineTo(-38, -4); ctx.closePath(); ctx.fill();
+  ctx.strokeStyle = 'rgba(40,50,60,0.6)'; ctx.stroke();
+  drawStar(-46, -10, 5, '#c0392b');
+  drawStar(-16, 0, 5.5, '#c0392b');
+  ctx.fillStyle = '#5a6a78'; ctx.font = 'bold 9px sans-serif'; ctx.textAlign = 'center';
+  ctx.fillText('95', 8, 3);
+  /* Torreta de cola */
+  ctx.fillStyle = '#3a454f'; ctx.fillRect(-62, -2, 6, 4);
+  ctx.fillStyle = '#222222'; ctx.fillRect(-66, -1, 4, 2);
+
+  /* Tren de aterrizaje */
+  if (p.gearDown) {
+    ctx.strokeStyle = '#333333'; ctx.lineWidth = 3;
+    ctx.beginPath(); ctx.moveTo(-8, 8); ctx.lineTo(-8, 20); ctx.moveTo(24, 8); ctx.lineTo(24, 20); ctx.stroke();
+    ctx.fillStyle = '#1a1a1a';
+    ctx.beginPath(); ctx.arc(-8, 22, 5, 0, TAU); ctx.arc(24, 22, 5, 0, TAU); ctx.fill();
+    ctx.lineWidth = 1;
+  }
+  /* Luces de navegación parpadeantes */
+  if (Math.floor(time * 2) % 2 === 0) {
+    ctx.fillStyle = '#ff4444'; ctx.beginPath(); ctx.arc(-50, -14, 2, 0, TAU); ctx.fill();
+    ctx.fillStyle = '#44ff44'; ctx.beginPath(); ctx.arc(50, -2, 2, 0, TAU); ctx.fill();
+  }
+  ctx.restore();
+}
+
+function drawParticles() {
+  for (const p of particles) {
+    ctx.globalAlpha = clamp(p.life / p.maxLife, 0, 1);
+    ctx.fillStyle = p.color;
+    ctx.beginPath(); ctx.arc(p.x - camX, GROUND_Y - p.y, p.size, 0, TAU); ctx.fill();
+  }
+  ctx.globalAlpha = 1;
+}
+function drawFlashes() {
+  for (const fl of flashes) {
+    const a = clamp(1 - fl.t, 0, 1);
+    const fx = fl.x - camX, fy = GROUND_Y - fl.y;
+    const g = ctx.createRadialGradient(fx, fy, 2, fx, fy, fl.r);
+    g.addColorStop(0, 'rgba(255,240,180,' + (0.9 * a) + ')');
+    g.addColorStop(0.5, 'rgba(255,150,50,' + (0.55 * a) + ')');
+    g.addColorStop(1, 'rgba(255,80,30,0)');
+    ctx.fillStyle = g; ctx.beginPath(); ctx.arc(fx, fy, fl.r, 0, TAU); ctx.fill();
+  }
+}
+function drawFloaters() {
+  ctx.textAlign = 'center';
+  for (const fl of floaters) {
+    ctx.globalAlpha = clamp(1.4 - fl.t, 0, 1);
+    ctx.font = 'bold ' + fl.size + "px 'Segoe UI',sans-serif";
+    ctx.fillStyle = fl.color;
+    ctx.strokeStyle = 'rgba(0,0,0,0.6)'; ctx.lineWidth = 3;
+    const sx = fl.x - camX, sy = GROUND_Y - fl.y;
+    ctx.strokeText(fl.text, sx, sy); ctx.fillText(fl.text, sx, sy);
+  }
+  ctx.globalAlpha = 1;
+}
+
+/* ---------------- HUD ---------------- */
+function panel(x, y, w, h) {
+  ctx.fillStyle = 'rgba(8,14,20,0.55)'; ctx.fillRect(x, y, w, h);
+  ctx.strokeStyle = 'rgba(255,255,255,0.18)'; ctx.strokeRect(x, y, w, h);
+}
+function drawHorizon(cx, cy, r) {
+  const p = plane;
+  ctx.save();
+  ctx.beginPath(); ctx.arc(cx, cy, r, 0, TAU); ctx.clip();
+  ctx.translate(cx, cy);
+  ctx.rotate(-p.bank * Math.PI / 180);
+  const hy = p.pitch * 1.5;
+  ctx.fillStyle = '#3a7bd5'; ctx.fillRect(-r * 2, -r * 2, r * 4, r * 2 + hy);
+  ctx.fillStyle = '#7a5a33'; ctx.fillRect(-r * 2, hy, r * 4, r * 2 - hy);
+  ctx.strokeStyle = 'rgba(255,255,255,0.65)'; ctx.lineWidth = 1;
+  for (const pa of [-10, -5, 5, 10]) {
+    const yy = hy + pa * 1.5;
+    ctx.beginPath(); ctx.moveTo(-13, yy); ctx.lineTo(13, yy); ctx.stroke();
+  }
+  ctx.restore();
+  ctx.strokeStyle = '#e8eef4'; ctx.beginPath(); ctx.arc(cx, cy, r, 0, TAU); ctx.stroke();
+  ctx.strokeStyle = '#ffd34d'; ctx.lineWidth = 3;
+  ctx.beginPath(); ctx.moveTo(cx - 26, cy); ctx.lineTo(cx - 8, cy); ctx.moveTo(cx + 8, cy); ctx.lineTo(cx + 26, cy); ctx.stroke();
+  ctx.fillStyle = '#ffd34d'; ctx.beginPath(); ctx.arc(cx, cy, 3, 0, TAU); ctx.fill();
+  ctx.lineWidth = 1;
+}
+function drawProgress() {
+  const x1 = 240, x2 = W - 250, y = 20;
+  ctx.strokeStyle = 'rgba(255,255,255,0.5)'; ctx.lineWidth = 2;
+  ctx.beginPath(); ctx.moveTo(x1, y); ctx.lineTo(x2, y); ctx.stroke(); ctx.lineWidth = 1;
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(x1 - 2, y - 5, 4, 10); ctx.fillRect(x2 - 2, y - 5, 4, 10);
+  for (const r of rings) {
+    const rx = x1 + clamp((r.x - startRunway.x) / (landRunway.x - startRunway.x), 0, 1) * (x2 - x1);
+    ctx.fillStyle = r.passed ? '#7CFC00' : '#ffd34d';
+    ctx.beginPath(); ctx.arc(rx, y, 4, 0, TAU); ctx.fill();
+  }
+  const t = clamp((plane.x - startRunway.x) / (landRunway.x - startRunway.x), 0, 1);
+  ctx.fillStyle = '#ff5533';
+  ctx.beginPath(); ctx.arc(x1 + t * (x2 - x1), y, 6, 0, TAU); ctx.fill();
+  ctx.strokeStyle = '#ffffff'; ctx.stroke();
+}
+function drawHUD() {
+  const p = plane;
+  ctx.save();
+  /* Panel izquierdo: velocidad / altitud */
+  panel(10, 10, 190, 96);
+  ctx.textAlign = 'left';
+  ctx.fillStyle = '#9fd8ff'; ctx.font = 'bold 12px monospace';
+  ctx.fillText('VELOCIDAD', 16, 28);
+  ctx.fillStyle = '#ffffff'; ctx.font = 'bold 20px monospace';
+  ctx.fillText(Math.round(p.speed) + ' km/h', 16, 50);
+  ctx.fillStyle = '#9fd8ff'; ctx.font = 'bold 12px monospace';
+  ctx.fillText('ALTITUD', 16, 68);
+  ctx.fillStyle = '#ffffff'; ctx.font = 'bold 16px monospace';
+  ctx.fillText(Math.round(p.y / 2) + ' m', 16, 88);
+  ctx.fillStyle = '#9fd8ff'; ctx.font = 'bold 12px monospace';
+  ctx.fillText('V/S ' + (p.vs / 2).toFixed(1) + ' m/s', 110, 88);
+
+  /* Panel derecho: throttle / flaps / tren / puntos */
+  panel(W - 210, 10, 200, 96);
+  ctx.fillStyle = '#9fd8ff'; ctx.font = 'bold 12px monospace';
+  ctx.fillText('ACELERACIÓN', W - 200, 28);
+  ctx.fillStyle = '#222222'; ctx.fillRect(W - 200, 34, 150, 10);
+  ctx.fillStyle = '#ffd34d'; ctx.fillRect(W - 200, 34, 150 * p.throttle, 10);
+  ctx.fillStyle = '#e8eef4'; ctx.font = 'bold 13px monospace';
+  ctx.fillText('FLAPS ' + p.flaps, W - 200, 62);
+  ctx.fillText('TREN ' + (p.gearDown ? 'ABAJO' : 'ARRIBA'), W - 200, 80);
+  ctx.fillStyle = '#ffd34d';
+  ctx.fillText('NIVEL ' + level + ' · ' + score + ' PTS', W - 200, 98);
+
+  /* Distancia a la pista de destino */
+  if (p.x > landRunway.x - 3500) {
+    const d = Math.max(0, Math.round((landRunway.x - p.x) / 2));
+    ctx.textAlign = 'right'; ctx.fillStyle = '#ffd34d'; ctx.font = 'bold 14px monospace';
+    ctx.fillText('PISTA 27: ' + d + ' m', W - 16, 122);
+  }
+
+  drawProgress();
+  drawHorizon(W / 2, H - 56, 36);
+
+  /* Avisos */
+  const warns = [];
+  if (!p.onGround && p.speed < stallSpeedOf(p) + 12) warns.push('¡STALL! ¡PÉRDIDA DE SUSTENTACIÓN!');
+  if (!p.onGround && p.y > 140 && p.gearDown) warns.push('SUBE EL TREN (G)');
+  if (p.x > landRunway.x - 1600 && p.flaps === 0) warns.push('CONFIGURA FLAPS (F)');
+  if (p.x > landRunway.x - 1600 && !p.gearDown && p.y < 120) warns.push('BAJA EL TREN (G)');
+  if (p.x > landRunway.x - 1400 && p.speed > 330) warns.push('REDUCE VELOCIDAD');
+  if (!p.onGround && p.y < 50 && p.vs < -55) warns.push('¡PULL UP!');
+  if (Math.abs(p.bank) > 25) warns.push('¡BALANCEO!');
+  if (Math.floor(time * 3) % 2 === 0) {
+    ctx.textAlign = 'center'; ctx.font = 'bold 17px monospace';
+    warns.forEach((w, i) => {
+      ctx.fillStyle = '#ff5533';
+      ctx.strokeStyle = 'rgba(0,0,0,0.7)'; ctx.lineWidth = 4;
+      ctx.strokeText(w, W / 2, 52 + i * 22);
+      ctx.fillText(w, W / 2, 52 + i * 22);
+    });
+    ctx.lineWidth = 1;
+  }
+  ctx.restore();
+}
+
+function render() {
+  ctx.save();
+  if (shake > 0) ctx.translate(rand(-shake, shake), rand(-shake, shake));
+  drawSky();
+  drawClouds();
+  drawMountains();
+  drawTerrain();
+  drawRings();
+  drawPlane();
+  drawParticles();
+  drawFlashes();
+  ctx.restore();
+  drawFloaters();
+  if (state === 'playing' || state === 'paused') drawHUD();
+}
+
+/* ---------------- Bucle principal ---------------- */
+let last = performance.now();
+function loop(now) {
+  requestAnimationFrame(loop);
+  let dt = (now - last) / 1000; last = now;
+  dt = Math.min(dt, 0.05);
+  if (state === 'playing') update(dt);
+  else if (state === 'crashed' || state === 'complete') updateFx(dt);
+  else time += dt;
+  render();
+}
+
+document.getElementById('titleRecord').textContent = record;
+document.getElementById('playBtn').addEventListener('click', () => { score = 0; showBriefing(1); });
+document.getElementById('startBtn').addEventListener('click', startLevel);
+document.getElementById('nextBtn').addEventListener('click', () => showBriefing(level + 1));
+document.getElementById('retryBtn').addEventListener('click', () => showBriefing(level));
+document.getElementById('resumeBtn').addEventListener('click', togglePause);
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>
